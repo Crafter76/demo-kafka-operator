@@ -15,7 +15,6 @@
 Показать, как можно:
 - Тестировать оператор **как unit-тест**
 - Запускать `kube-apiserver` локально
-- Управлять состоянием через `kubectl`
 - Обеспечивать надёжность reconcile
 
 ---
@@ -29,7 +28,7 @@ demo-kafka-operator/
 ├── mocks/                   # Mock Kafka API
 ├── test/                    # Env-тесты
 ├── config/crd/              # kafkav1.crd.yaml
-├── bin/                     # etcd, kube-apiserver, kubectl
+├── bin/                     # etcd, kube-apiserver
 ├── go.mod
 └── Makefile
 ```
