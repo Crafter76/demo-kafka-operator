@@ -26,11 +26,11 @@ spec:
               properties:
                 topic:
                   type: string
-                  description: "Topic, to which the user will have access"
+                  description: Topic to grant access
                 permissions:
                   type: string
                   enum: ["read", "write", "admin"]
-                  description: "Permissions for the user"
+                  description: Permissions for the user
               required:
                 - topic
                 - permissions

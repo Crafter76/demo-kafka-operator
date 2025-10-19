@@ -11,6 +11,8 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/client-go/tools/clientcmd"
+	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
@@ -55,6 +57,31 @@ func TestMain(m *testing.M) {
 	if err != nil {
 		panic(err)
 	}
+
+	kubeconfigPath := filepath.Join("..", "bin", "kubeconfig.yaml")
+	clientCmdConfig := clientcmdapi.Config{
+		APIVersion: "v1",
+		Kind:       "Config",
+		Clusters: map[string]*clientcmdapi.Cluster{
+			"test-cluster": {
+				Server:                cfg.Host,
+				InsecureSkipTLSVerify: true,
+			},
+		},
+		AuthInfos: map[string]*clientcmdapi.AuthInfo{
+			"test-user": {Token: "dummy"},
+		},
+		Contexts: map[string]*clientcmdapi.Context{
+			"test-context": {
+				Cluster:  "test-cluster",
+				AuthInfo: "test-user",
+			},
+		},
+		CurrentContext: "test-context",
+	}
+	if err := clientcmd.WriteToFile(clientCmdConfig, kubeconfigPath); err != nil {
+		panic(err)
+	}
 	defer func() {
 		if err := testEnv.Stop(); err != nil {
 			panic(err)
@@ -65,19 +92,19 @@ func TestMain(m *testing.M) {
 	k8sManager, err = ctrl.NewManager(cfg, ctrl.Options{
 		Scheme:         scheme,
 		Metrics:        server.Options{BindAddress: "0"},
-		LeaderElection: false, // выключаем для теста
+		LeaderElection: false,
 	})
 	if err != nil {
 		panic(err)
 	}
 
-	// Включаем логирование (чтобы видеть reconcile)
+	// Логирование
 	ctrl.SetLogger(zap.New(zap.UseDevMode(true)))
 
-	// Инициализируем mock
+	// Mock
 	mockKafka = mocks.NewMockKafkaClient()
 
-	// Регистрируем контроллер
+	// Контроллер
 	reconciler := &controller.KafkaUserReconciler{
 		Client: k8sManager.GetClient(),
 		Scheme: k8sManager.GetScheme(),
@@ -87,10 +114,10 @@ func TestMain(m *testing.M) {
 		panic(err)
 	}
 
-	// Сохраняем клиент
+	// Клиент
 	k8sClient = k8sManager.GetClient()
 
-	// Запускаем manager в фоне
+	// Запуск manager
 	ctx, cancel = context.WithCancel(context.TODO())
 	go func() {
 		if err := k8sManager.Start(ctx); err != nil {
@@ -98,13 +125,12 @@ func TestMain(m *testing.M) {
 		}
 	}()
 
-	// Запускаем тесты
+	// Запуск тестов
 	m.Run()
 
-	// Останавливаем
+	// Остановка
 	cancel()
-
-	<-k8sManager.Elected()
+	<-ctx.Done()
 }
 
 func TestKafkaUserCreation(t *testing.T) {
@@ -120,22 +146,22 @@ func TestKafkaUserCreation(t *testing.T) {
 	}
 	g.Expect(k8sClient.Create(ctx, user)).To(Succeed())
 
-	t.Log("2. Проверяем, что CR действительно создан")
+	t.Log("2. Проверяем, что CR создан")
 	g.Eventually(func() error {
 		return k8sClient.Get(ctx, client.ObjectKeyFromObject(user), &v1.KafkaUser{})
-	}, 5*time.Second, time.Second).Should(Succeed())
+	}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
 
-	t.Log("3. Проверяем, что reconcile запустился (mock Kafka был вызван)")
+	t.Log("3. Проверяем, что reconcile запустился (mock вызван)")
 	g.Eventually(func() int {
-		return mockKafka.Calls // счётчик из mocks/mock_kafka.go
-	}, 5*time.Second, time.Second).Should(BeNumerically(">", 0), "Ожидался вызов mockKafka.CreateUser")
+		return mockKafka.Calls
+	}, 5*time.Second, 100*time.Millisecond).Should(BeNumerically(">", 0))
 
 	t.Log("4. Проверяем, что finalizer добавлен")
 	g.Eventually(func() []string {
 		var u v1.KafkaUser
 		_ = k8sClient.Get(ctx, client.ObjectKeyFromObject(user), &u)
 		return u.Finalizers
-	}, 10*time.Second, time.Second).Should(ContainElement("kafka.appfarm.rs/finalizer"))
+	}, 5*time.Second, 100*time.Millisecond).Should(ContainElement("kafka.appfarm.rs/finalizer"))
 
 	t.Log("5. Проверяем, что статус обновлён: Created=True")
 	g.Eventually(func() []metav1.Condition {
@@ -144,7 +170,7 @@ func TestKafkaUserCreation(t *testing.T) {
 			return nil
 		}
 		return u.Status.Conditions
-	}, 5*time.Second, time.Second).Should(
+	}, 10*time.Second, 100*time.Millisecond).Should(
 		ContainElement(And(
 			HaveField("Type", "Created"),
 			HaveField("Status", metav1.ConditionTrue),
@@ -154,6 +180,6 @@ func TestKafkaUserCreation(t *testing.T) {
 		"Контроллер должен установить статус Created=True после успешного создания пользователя",
 	)
 
-	t.Log("6. Финальная проверка: пользователь есть в mock")
+	t.Log("6. Проверяем, что пользователь есть в mock")
 	g.Expect(mockKafka.HasUser("dev-user")).To(BeTrue(), "mockKafka должен содержать пользователя 'dev-user'")
 }

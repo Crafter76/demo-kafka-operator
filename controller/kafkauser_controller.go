@@ -58,7 +58,7 @@ func (r *KafkaUserReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	}
 
 	if r.Kafka.HasUser(req.Name) {
-		log.Info("User already exists in Kafka, checking status...")
+		log.Info("User already exists in Kafka, skipping creation")
 	} else {
 		log.Info("Creating user in Kafka via mock")
 		if err := r.Kafka.CreateUser(req.Name); err != nil {
@@ -76,7 +76,7 @@ func (r *KafkaUserReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	updateCondition(&kafkaUser, "Created", metav1.ConditionTrue, "Success", "User created in Kafka")
 
 	if err := r.Status().Patch(ctx, &kafkaUser, client.MergeFrom(original)); err != nil {
-		log.Error(err, "CRITICAL: Failed to update status after successful creation. Will retry.")
+		log.Error(err, "Failed to update status, will retry")
 		return ctrl.Result{Requeue: true}, nil
 	}
 
